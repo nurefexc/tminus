@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""One-shot catch-up run by the systemd timer.
+
+Checks that the watcher is alive and reports alarms that have fired but are
+not currently displayed (e.g. after a suspend or a crashed service).
+"""
+
+import argparse
+import shutil
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+from tminus import (format_countdown, format_start, notify, read_state,  # noqa: E402
+                    scan, urgency_for)
+
+UNIT = "tminus.service"
+
+
+def watcher_alive() -> bool | None:
+    """True/False when systemd knows the unit, None when it does not."""
+    systemctl = shutil.which("systemctl")
+    if not systemctl:
+        return None
+    probe = subprocess.run(
+        [systemctl, "--user", "is-active", "--quiet", UNIT],
+        capture_output=True, check=False,
+    )
+    if probe.returncode not in (0, 3):
+        return None
+    return probe.returncode == 0
+
+
+def start_watcher() -> None:
+    systemctl = shutil.which("systemctl")
+    if systemctl:
+        subprocess.run([systemctl, "--user", "start", UNIT],
+                       capture_output=True, check=False)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--days", type=int, default=7)
+    parser.add_argument("--expire", type=int, default=10000,
+                        help="timeout for catch-up notices in ms (default: 10000)")
+    args = parser.parse_args()
+
+    alive = watcher_alive()
+    if alive is False:
+        start_watcher()
+        return 0
+    if alive is None and not shutil.which("systemctl"):
+        print("tminus-sweep: no systemd, watcher state unknown", file=sys.stderr)
+
+    tracked = set(read_state().get("ids", {}))
+    try:
+        alarms = scan(args.days)
+    except RuntimeError as exc:
+        print(f"tminus-sweep: {exc}", file=sys.stderr)
+        return 1
+
+    for alarm in alarms:
+        if alarm["uid"] in tracked:
+            continue
+        remaining = alarm["start_ts"] - time.time()
+        if remaining <= 0:
+            continue
+        start = datetime.fromisoformat(alarm["start"])
+        notify(
+            f"Calendar alarm: {alarm['title']}",
+            f"Starts {format_start(start)} · in {format_countdown(remaining)}",
+            urgency=urgency_for(remaining),
+            expire_ms=args.expire,
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

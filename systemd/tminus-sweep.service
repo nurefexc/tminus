@@ -1,0 +1,6 @@
+[Unit]
+Description=tminus catch-up sweep
+
+[Service]
+Type=oneshot
+ExecStart=%h/Projects/tminus/bin/tminus-sweep

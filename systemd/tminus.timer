@@ -1,0 +1,11 @@
+[Unit]
+Description=tminus alarm watchdog and catch-up
+
+[Timer]
+OnCalendar=*:0/2
+AccuracySec=15s
+Persistent=true
+Unit=tminus-sweep.service
+
+[Install]
+WantedBy=timers.target

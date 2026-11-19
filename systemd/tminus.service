@@ -1,0 +1,14 @@
+[Unit]
+Description=tminus - live calendar alarm countdown
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/Projects/tminus/bin/tminus-watch
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
