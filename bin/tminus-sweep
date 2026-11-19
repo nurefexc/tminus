@@ -14,8 +14,9 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
-from tminus import (format_countdown, format_start, notify, read_state,  # noqa: E402
-                    scan, urgency_for)
+from tminus import (alarm_key, format_countdown, format_start, load_dismissed,  # noqa: E402
+                    log_event, notification_style, notify, read_state, scan,
+                    urgency_for)
 
 UNIT = "tminus.service"
 
@@ -56,6 +57,7 @@ def main() -> int:
         print("tminus-sweep: no systemd, watcher state unknown", file=sys.stderr)
 
     tracked = set(read_state().get("ids", {}))
+    dismissed = load_dismissed()
     try:
         alarms = scan(args.days)
     except RuntimeError as exc:
@@ -63,18 +65,20 @@ def main() -> int:
         return 1
 
     for alarm in alarms:
-        if alarm["uid"] in tracked:
+        if alarm["uid"] in tracked or alarm_key(alarm) in dismissed:
             continue
         remaining = alarm["start_ts"] - time.time()
         if remaining <= 0:
             continue
         start = datetime.fromisoformat(alarm["start"])
-        notify(
+        notification_id = notify(
             f"Calendar alarm: {alarm['title']}",
             f"Starts {format_start(start)} · in {format_countdown(remaining)}",
             urgency=urgency_for(remaining),
             expire_ms=args.expire,
+            colors=notification_style(alarm, remaining),
         )
+        log_event("catchup", alarm, notification_id=notification_id)
     return 0
 
 

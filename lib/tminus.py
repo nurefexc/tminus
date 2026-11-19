@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -28,8 +29,20 @@ KHAL_FIELDS = (
     "alarms-list",
 )
 
+DATA_HOME = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
+STATE_HOME = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
 RUN_DIR = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / APP_NAME
 STATE_FILE = RUN_DIR / "notifications.json"
+DISMISSED_FILE = RUN_DIR / "dismissed.json"
+EVENT_LOG = STATE_HOME / APP_NAME / "events.log"
+CALENDAR_DIR = Path(
+    os.environ.get("TMINUS_CALENDAR_DIR") or DATA_HOME / "calendars"
+)
+
+URGENT_SECONDS = 60
+URGENT_COLOR = os.environ.get("TMINUS_URGENT_COLOR") or "#f38ba8"
+DISMISS_REASONS = (2, 3)  # "dismissed by user", "closed by client" (dunstctl)
+_COLOR_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
 
 
 # --------------------------------------------------------------------------- #
@@ -80,6 +93,47 @@ def urgency_for(seconds: float) -> str:
     if seconds <= 3600:
         return "normal"
     return "low"
+
+
+def is_urgent(seconds: float) -> bool:
+    """True in the final minute before the event starts."""
+    return seconds <= URGENT_SECONDS
+
+
+# --------------------------------------------------------------------------- #
+# Notification colours
+# --------------------------------------------------------------------------- #
+def _read_color(path: Path) -> str | None:
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    match = _COLOR_RE.match(raw)
+    return "#" + match.group(1).lower() if match else None
+
+
+def calendar_color(name: str) -> str | None:
+    """Read a vdir calendar's colour (vdirsyncer `color` metadata).
+
+    Returns None when the calendar has no colour file, so the daemon's own
+    category styling stays in effect.
+    """
+    if not name or name in (".", "..") or "/" in name or "\\" in name:
+        return None
+    return _read_color(CALENDAR_DIR / name / "color")
+
+
+def notification_style(alarm: dict, seconds: float) -> dict[str, str]:
+    """Dunst colour hints: the calendar's frame colour, red in the last minute."""
+    style: dict[str, str] = {}
+    if is_urgent(seconds):
+        style["frcolor"] = URGENT_COLOR
+        style["fgcolor"] = URGENT_COLOR
+    else:
+        color = calendar_color(str(alarm.get("calendar") or ""))
+        if color:
+            style["frcolor"] = color
+    return style
 
 
 # --------------------------------------------------------------------------- #
@@ -197,11 +251,13 @@ def notify(
     replace_id: int | None = None,
     icon: str | None = ICON,
     backend: str = "auto",
+    colors: dict[str, str] | None = None,
 ) -> int | None:
     """Send (or replace) a notification and return its id, if available.
 
-    Falls back to stderr when no notification daemon is present, so the
-    tools remain useful over SSH and in plain ttys.
+    `colors` maps dunst hint names (`frcolor`, `fgcolor`, ...) to hex values.
+    Falls back to stderr when no notification daemon is present, so the tools
+    remain useful over SSH and in plain ttys.
     """
     choices = backends()
     if backend != "auto":
@@ -224,6 +280,8 @@ def notify(
             cmd.extend(("--replace-id", str(replace_id)))
         if icon:
             cmd.extend(("--icon", icon))
+        for hint, value in (colors or {}).items():
+            cmd.extend(("-h", f"string:{hint}:{value}"))
         cmd.extend((summary, body))
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if proc.returncode == 0:
@@ -263,6 +321,157 @@ def close_notification(
                 capture_output=True, check=False,
             )
             return
+
+
+class GioNotifier:
+    """Direct freedesktop D-Bus notifier that can observe close events.
+
+    Sending the Notify call on our own connection means the daemon addresses
+    `NotificationClosed` to us. The watcher pumps `pump()` once per tick and
+    reads the results from `drain_closed()`; no GLib main loop thread needed.
+    """
+
+    def __init__(self) -> None:
+        from gi.repository import Gio, GLib  # optional dependency
+
+        self._Gio = Gio
+        self._GLib = GLib
+        self.conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        self._closed: list[tuple[int, int]] = []
+        self._self_closed: set[int] = set()
+        self.keys: dict[int, str] = {}
+        self.conn.signal_subscribe(
+            "org.freedesktop.Notifications",
+            "org.freedesktop.Notifications",
+            "NotificationClosed",
+            "/org/freedesktop/Notifications",
+            None,
+            Gio.DBusSignalFlags.NONE,
+            self._on_closed,
+        )
+        self._context = GLib.MainContext.default()
+
+    def _on_closed(self, _conn, _sender, _path, _iface, _signal, params) -> None:
+        self._closed.append(tuple(int(v) for v in params.unpack()))
+
+    def pump(self) -> None:
+        """Dispatch pending D-Bus signals."""
+        self._context.iteration(False)
+
+    def drain_closed(self) -> list[tuple[int, int, str | None]]:
+        """Return (id, reason, alarm key) for closes we did not request."""
+        events, self._closed = self._closed, []
+        result = []
+        for notification_id, reason in events:
+            key = self.keys.pop(notification_id, None)
+            if notification_id in self._self_closed:
+                self._self_closed.discard(notification_id)
+                continue
+            result.append((notification_id, reason, key))
+        return result
+
+    def notify(
+        self,
+        key: str,
+        summary: str,
+        body: str = "",
+        *,
+        urgency: str = "normal",
+        expire_ms: int = 2500,
+        replace_id: int | None = None,
+        colors: dict[str, str] | None = None,
+    ) -> int:
+        GLib, Gio = self._GLib, self._Gio
+        level = {"low": 0, "normal": 1, "critical": 2}.get(urgency, 1)
+        hints: dict[str, object] = {"urgency": GLib.Variant("y", level)}
+        for name, value in (colors or {}).items():
+            hints[name] = GLib.Variant("s", value)
+        params = GLib.Variant(
+            "(susssasa{sv}i)",
+            (APP_NAME, int(replace_id or 0), ICON, summary, body, [], hints,
+             int(expire_ms)),
+        )
+        reply = self.conn.call_sync(
+            "org.freedesktop.Notifications",
+            "/org/freedesktop/Notifications",
+            "org.freedesktop.Notifications",
+            "Notify",
+            params,
+            None,
+            Gio.DBusCallFlags.NONE,
+            5000,
+            None,
+        )
+        notification_id = int(reply.unpack()[0])
+        self.keys[notification_id] = key
+        return notification_id
+
+    def close(self, notification_id: int) -> None:
+        Gio = self._Gio
+        self._self_closed.add(int(notification_id))
+        self.conn.call_sync(
+            "org.freedesktop.Notifications",
+            "/org/freedesktop/Notifications",
+            "org.freedesktop.Notifications",
+            "CloseNotification",
+            self._GLib.Variant("(u)", (int(notification_id),)),
+            None,
+            Gio.DBusCallFlags.NONE,
+            5000,
+            None,
+        )
+        self.keys.pop(notification_id, None)
+
+
+# --------------------------------------------------------------------------- #
+# Dismissal state and event log
+# --------------------------------------------------------------------------- #
+def alarm_key(alarm: dict) -> str:
+    """Stable identity of one fired alarm instance."""
+    return f"{alarm.get('uid', '')}|{alarm.get('alarm_at', '')}"
+
+
+def load_dismissed() -> set[str]:
+    try:
+        data = json.loads(DISMISSED_FILE.read_text(encoding="utf-8"))
+        keys = data.get("keys") if isinstance(data, dict) else None
+        if isinstance(keys, list):
+            return {str(key) for key in keys}
+    except (OSError, json.JSONDecodeError):
+        pass
+    return set()
+
+
+def save_dismissed(keys: set[str]) -> None:
+    try:
+        RUN_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = DISMISSED_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"keys": sorted(keys)}), encoding="utf-8")
+        tmp.replace(DISMISSED_FILE)
+    except OSError:
+        pass
+
+
+def log_event(event: str, alarm: dict, **extra: object) -> None:
+    """Append one JSON line to the persistent event log.
+
+    Only state changes are logged (shown, dismiss, ended, catchup) - not the
+    once-per-second countdown refreshes.
+    """
+    try:
+        EVENT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        entry: dict[str, object] = {
+            "at": time.time(),
+            "event": event,
+            "key": alarm_key(alarm),
+            "title": alarm.get("title"),
+            "calendar": alarm.get("calendar"),
+        }
+        entry.update(extra)
+        with EVENT_LOG.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 
 
 # --------------------------------------------------------------------------- #
