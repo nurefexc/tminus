@@ -85,6 +85,12 @@ class ColourTests(unittest.TestCase):
         self.assertEqual(tminus.calendar_color("missing"), None)
         self.assertEqual(tminus.calendar_color("../work"), None)
 
+    def test_alpha_channel_is_stripped(self):
+        (self.base / "personal").mkdir()
+        (self.base / "personal" / "color").write_text(
+            "#1c71d8ff\n", encoding="utf-8")
+        self.assertEqual(tminus.calendar_color("personal"), "#1c71d8")
+
     def test_invalid_color_is_ignored(self):
         (self.base / "bad").mkdir()
         (self.base / "bad" / "color").write_text("not-a-colour", encoding="utf-8")

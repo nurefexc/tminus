@@ -42,7 +42,8 @@ CALENDAR_DIR = Path(
 URGENT_SECONDS = 60
 URGENT_COLOR = os.environ.get("TMINUS_URGENT_COLOR") or "#f38ba8"
 DISMISS_REASONS = (2, 3)  # "dismissed by user", "closed by client" (dunstctl)
-_COLOR_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
+# vdirsyncer stores vCard/CalDAV colours as #RRGGBBAA; ignore the alpha.
+_COLOR_RE = re.compile(r"^#?([0-9a-fA-F]{6})(?:[0-9a-fA-F]{2})?$")
 
 
 # --------------------------------------------------------------------------- #
@@ -383,7 +384,10 @@ class GioNotifier:
     ) -> int:
         GLib, Gio = self._GLib, self._Gio
         level = {"low": 0, "normal": 1, "critical": 2}.get(urgency, 1)
-        hints: dict[str, object] = {"urgency": GLib.Variant("y", level)}
+        hints: dict[str, object] = {
+            "urgency": GLib.Variant("y", level),
+            "category": GLib.Variant("s", CATEGORY),
+        }
         for name, value in (colors or {}).items():
             hints[name] = GLib.Variant("s", value)
         params = GLib.Variant(
