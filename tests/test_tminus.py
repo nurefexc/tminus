@@ -91,6 +91,22 @@ class ColourTests(unittest.TestCase):
             "#1c71d8ff\n", encoding="utf-8")
         self.assertEqual(tminus.calendar_color("personal"), "#1c71d8")
 
+    def test_displayname_resolution(self):
+        folder = self.base / "personal"
+        folder.mkdir()
+        (folder / "color").write_text("#1c71d8ff", encoding="utf-8")
+        (folder / "displayname").write_text("Personal", encoding="utf-8")
+        self.assertEqual(tminus.calendar_color("Personal"), "#1c71d8")
+        self.assertEqual(tminus.calendar_color("personal"), "#1c71d8")
+        self.assertEqual(tminus.calendar_color("unknown"), None)
+
+    def test_displayname_with_slash(self):
+        folder = self.base / "calendar-it"
+        folder.mkdir()
+        (folder / "color").write_text("#f57c00ff", encoding="utf-8")
+        (folder / "displayname").write_text("Events/IT", encoding="utf-8")
+        self.assertEqual(tminus.calendar_color("Events/IT"), "#f57c00")
+
     def test_invalid_color_is_ignored(self):
         (self.base / "bad").mkdir()
         (self.base / "bad" / "color").write_text("not-a-colour", encoding="utf-8")

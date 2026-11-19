@@ -86,7 +86,10 @@ Dunst colour hints are used, so other daemons simply ignore them:
 
 - The notification frame uses the calendar's own colour, read from the vdir
   `color` file (`~/.local/share/calendars/<name>/color`, synced by vdirsyncer
-  `color` metadata). Set `TMINUS_CALENDAR_DIR` to override the calendar root.
+  `color` metadata). Khal reports the display name (`Personal`, `Events/IT`),
+  which is matched against each vdir's `displayname` file if it is not also a
+  directory name; the alpha channel of `#RRGGBBAA` values is ignored. Set
+  `TMINUS_CALENDAR_DIR` to override the calendar root.
 - In the final minute before the event starts, the frame and text switch to a
   red highlight (`#f38ba8` by default, override with `TMINUS_URGENT_COLOR`).
 - If a calendar has no colour file, the daemon's category styling applies.

@@ -114,14 +114,36 @@ def _read_color(path: Path) -> str | None:
 
 
 def calendar_color(name: str) -> str | None:
-    """Read a vdir calendar's colour (vdirsyncer `color` metadata).
+    """Resolve a khal calendar name to its vdir colour.
 
-    Returns None when the calendar has no colour file, so the daemon's own
-    category styling stays in effect.
+    Khal reports the vdir display name once vdirsyncer has synchronized the
+    metadata ("Personal" or "Events/IT"), not necessarily the directory name
+    ("personal", "calendar-it"), so both forms have to work. Returns None when
+    no colour is found, leaving the daemon's own styling in effect.
     """
-    if not name or name in (".", "..") or "/" in name or "\\" in name:
+    if not name:
         return None
-    return _read_color(CALENDAR_DIR / name / "color")
+    wanted = name.strip().lower()
+    if "/" not in name and "\\" not in name and name not in (".", ".."):
+        direct = _read_color(CALENDAR_DIR / name / "color")
+        if direct:
+            return direct
+    try:
+        children = [path for path in CALENDAR_DIR.iterdir() if path.is_dir()]
+    except OSError:
+        return None
+    for child in children:
+        try:
+            display = child.joinpath("displayname").read_text(
+                encoding="utf-8").strip().lower()
+        except OSError:
+            continue
+        if display == wanted:
+            return _read_color(child / "color")
+    for child in children:
+        if child.name.lower() == wanted:
+            return _read_color(child / "color")
+    return None
 
 
 def notification_style(alarm: dict, seconds: float) -> dict[str, str]:
