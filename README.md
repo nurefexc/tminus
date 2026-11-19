@@ -30,7 +30,10 @@ front-ends.
 ```
 
 The script links the units into `~/.config/systemd/user/`, then enables and
-starts `tminus.service` and `tminus.timer`.
+starts `tminus.service` and `tminus.timer`. `./uninstall.sh` reverses that:
+it stops and disables the units and removes the symlinks. Add `--purge` to
+also delete the runtime state and the event log. Calendar data is never
+touched.
 
 The dunst styling is in `dunst/tminus.conf` — append it to your
 `~/.config/dunst/dunstrc` and reload dunst (`dunstctl reload`). Other
