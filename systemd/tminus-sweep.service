@@ -3,4 +3,4 @@ Description=tminus catch-up sweep
 
 [Service]
 Type=oneshot
-ExecStart=%h/Projects/tminus/bin/tminus-sweep
+ExecStart=%h/Projects/tminus/bin/tminus-sweep.py

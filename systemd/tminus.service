@@ -5,7 +5,7 @@ PartOf=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=%h/Projects/tminus/bin/tminus-watch
+ExecStart=%h/Projects/tminus/bin/tminus-watch.py
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1

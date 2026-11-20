@@ -15,10 +15,10 @@ the text goes to stderr.
 
 | Command | Purpose |
 |---|---|
-| `bin/tminus-scan` | List currently active alarms as JSON. |
-| `bin/tminus-notify` | Generic notification sender: ID replacement, urgency, category, stdin JSON. |
-| `bin/tminus-watch` | The watcher process: refreshes notifications every second. |
-| `bin/tminus-sweep` | One-shot check: keeps the watcher alive and reports missed alarms. |
+| `bin/tminus-scan.py` | List currently active alarms as JSON. |
+| `bin/tminus-notify.py` | Generic notification sender: ID replacement, urgency, category, stdin JSON. |
+| `bin/tminus-watch.py` | The watcher process: refreshes notifications every second. |
+| `bin/tminus-sweep.py` | One-shot check: keeps the watcher alive and reports missed alarms. |
 
 Shared logic lives in `lib/tminus.py`; the scripts in `bin/` are thin
 front-ends.
@@ -42,10 +42,10 @@ notification daemons need no extra step.
 Running manually without systemd:
 
 ```sh
-bin/tminus-scan --pretty
-bin/tminus-watch --scan-interval 15
-bin/tminus-notify -s 'Title' -b 'Message' -u critical
-echo '{"summary":"Title","body":"Message"}' | bin/tminus-notify
+bin/tminus-scan.py --pretty
+bin/tminus-watch.py --scan-interval 15
+bin/tminus-notify.py -s 'Title' -b 'Message' -u critical
+echo '{"summary":"Title","body":"Message"}' | bin/tminus-notify.py
 ```
 
 ## How it works
@@ -97,8 +97,8 @@ Dunst colour hints are used, so other daemons simply ignore them:
 ## Tuning
 
 ```sh
-bin/tminus-watch --days 14 --scan-interval 10 --expire 3000
-bin/tminus-sweep --days 14 --expire 15000
+bin/tminus-watch.py --days 14 --scan-interval 10 --expire 3000
+bin/tminus-sweep.py --days 14 --expire 15000
 ```
 
 Edit the `ExecStart` line in `tminus.service` for permanent flag changes.
