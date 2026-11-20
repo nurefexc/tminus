@@ -1,5 +1,7 @@
 # tminus
 
+Repository: https://github.com/nurefexc/tminus
+
 Live, second-accurate countdowns for calendar alarms in desktop notifications.
 It watches the `VALARM` entries recognised by `khal`: as soon as an alarm fires
 but the event has not started yet, the notification appears and the remaining
